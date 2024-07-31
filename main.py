@@ -11,18 +11,18 @@ import time
 
 def read_secrets() -> dict:
     try:
-        return json.load(open('secrets.json'))
+        with open('secrets.json') as f:
+            return json.load(f)
     except FileNotFoundError:
+        print("secrets.json file not found.")
         return {}
-secrets = read_secrets()
+    except json.JSONDecodeError:
+        print("Error decoding secrets.json file.")
+        return {}
 
 
 
-
-prev_motion = [None,None]
-
-
-def fetch_data_from_source(url):
+def fetch_data_from_source(url, secrets):
     """Fetch data from the source API."""
     try:
         response = requests.get(url, verify = False, auth=(secrets["user"], secrets["password"]))
@@ -47,22 +47,34 @@ def push_data_to_tandem(data, url):
     except requests.RequestException as e:
         print(f"Error pushing data to Tandem Connect: {e}")
 def main():
+    secrets = read_secrets()
+    if not secrets:
+        print("No secrets loaded. Exiting...")
+        return
+    
+    source_urls = secrets.get("source_urls", [])
+    tandem_urls = secrets.get("tandem_urls", [])
+
+    if not source_urls or not tandem_urls:
+        print("Source URLs or Tandem URLs are missing. Exiting...")
+        return
    
-    global prev_motion
+    prev_motion = [None] * len(source_urls)
+    
 
     while True:
          for i, (source_url, tandem_url) in enumerate(zip(secrets["source_urls"], secrets["tandem_urls"])):
-            data = fetch_data_from_source(source_url)
+            data = fetch_data_from_source(source_url, secrets)
             if data:
                 #check if motion is the keyword
                 curr_motion = data.get('sensorStats', {}).get('motion', {}).get('instant')
 
                 if curr_motion is not None:
-                    if prev_motion is None:
-                        prev_motion = curr_motion
+                    if prev_motion[i] is None:
+                        prev_motion[i] = curr_motion
 
-                    motion_detected = motion_conversion(curr_motion, prev_motion)
-                    prev_motion = curr_motion # update prev motion value
+                    motion_detected = motion_conversion(curr_motion, prev_motion[i])
+                    prev_motion[i] = curr_motion # update prev motion value
 
                     #prep data for push
                     sensor_stats = data.get('sensorStats', {})
@@ -89,7 +101,7 @@ def main():
             else: 
                 print("No data fetched from source")
 
-            time.sleep(300) #wait for 5 minutes to run again
+            time.sleep(30) #wait for 5 minutes to run again
 
 if __name__ == "__main__":
     main()
