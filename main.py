@@ -8,28 +8,44 @@ import json
 import os
 import requests
 import time
+import logging
+from logging.handlers import RotatingFileHandler
+
+logger = logging.getLogger(__name__)
+log_name = 'WTEC-sensor-logging'
+logging.basicConfig(
+    filename=log_name,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+log = logging.getLogger()
+handler = RotatingFileHandler(
+    log_name,
+    maxBytes = 1024*1024*1024, 
+    backupCount=1
+    )
 
 def read_secrets() -> dict:
     try:
         with open('secrets.json') as f:
+            logging.info("Successfully loaded secrets.")
             return json.load(f)
     except FileNotFoundError:
-        print("secrets.json file not found.")
+        logging.error("secrets.json not found")
         return {}
     except json.JSONDecodeError:
-        print("Error decoding secrets.json file.")
+        logging.error("Error decoding secrets.json file.")
         return {}
-
-
 
 def fetch_data_from_source(url, secrets):
     """Fetch data from the source API."""
     try:
         response = requests.get(url, verify = False, auth=(secrets["user"], secrets["password"]))
         response.raise_for_status()  # Raise an error for bad status codes
+        logging.info(f"Data fetched successfully from {url}.")
         return response.json()  # Return data as a JSON object
     except requests.RequestException as e:
-        print(f"Error fetching data from source: {e}")
+        logging.error(f"Error fetching data from source: {e}")
         return None
     
 def motion_conversion(curr, prev):
@@ -44,33 +60,31 @@ def push_data_to_tandem(data, url):
         headers = {'Content-Type': 'application/json'}  
         response = requests.post(url, data=json.dumps(data), headers=headers)
         response.raise_for_status()  # Raise an error for bad status codes
-        print(f"Data successfully pushed to {url}.")
+        logging.info(f"Data successfully pushed to {url}.")
     except requests.RequestException as e:
-        print(f"Error pushing data to Tandem Connect: {e}")
+        logging.error(f"Error pushing data to Tandem Connect: {e}")
 
 def main():
     secrets = read_secrets()
     if not secrets:
-        print("No secrets loaded. Exiting...")
+        logging.error("No secrets loaded. Exiting...")
         return
     
     source_urls = secrets.get("source_urls", [])
     tandem_urls = secrets.get("tandem_urls", [])
 
     if not source_urls or not tandem_urls:
-        print("Source URLs or Tandem URLs are missing. Exiting...")
+        logging.error("Source URLs or Tandem URLs are missing. Exiting...")
         return
    
     if len(source_urls) > len(tandem_urls):
-        print("More source URLs than Tandem URLs. Each source URL needs a corresponding Tandem URL.")
+        logging.error("More source URLs than Tandem URLs. Each source URL needs a corresponding Tandem URL.")
         return
     #mapping for source/tandem urls
     url_mapping = dict(zip(source_urls, tandem_urls))
 
     prev_motion = {url: None for url in source_urls}
-    
-    
-
+      
     while True:
         for source_url in source_urls:
             tandem_url = url_mapping.get(source_url)
@@ -110,13 +124,13 @@ def main():
                     if tandem_url in tandem_urls:
                         push_data_to_tandem(datapush, tandem_url)
                     else:
-                        print(f"No Tandem URL mapped for source URL: {source_url}")
+                        logging.warning(f"No Tandem URL mapped for source URL: {source_url}")
                 else:
-                    print("No 'motion' parameter found")
+                    logging.warning("No 'motion' parameter found")
             else: 
-                print("No data fetched from source")
+                logging.warning("No data fetched from source")
 
-        print("Cycle complete. Sleeping for 5 minutes...")
+        logging.info("Cycle complete. Sleeping for 5 minutes...")
         time.sleep(300) #wait for 5 minutes to run again
 
 if __name__ == "__main__":
