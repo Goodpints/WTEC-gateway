@@ -40,12 +40,14 @@ def motion_conversion(curr, prev):
     
 def push_data_to_tandem(data, url):
     """Push data to Autodesk Tandem Connect."""
-    try:  
-        response = requests.post(url, data=json.dumps(data))
+    try:
+        headers = {'Content-Type': 'application/json'}  
+        response = requests.post(url, data=json.dumps(data), headers=headers)
         response.raise_for_status()  # Raise an error for bad status codes
-        print("Data successfully pushed to Tandem Connect.")
+        print(f"Data successfully pushed to {url}.")
     except requests.RequestException as e:
         print(f"Error pushing data to Tandem Connect: {e}")
+
 def main():
     secrets = read_secrets()
     if not secrets:
@@ -59,22 +61,31 @@ def main():
         print("Source URLs or Tandem URLs are missing. Exiting...")
         return
    
-    prev_motion = [None] * len(source_urls)
+    if len(source_urls) > len(tandem_urls):
+        print("More source URLs than Tandem URLs. Each source URL needs a corresponding Tandem URL.")
+        return
+    #mapping for source/tandem urls
+    url_mapping = dict(zip(source_urls, tandem_urls))
+
+    prev_motion = {url: None for url in source_urls}
+    
     
 
     while True:
-         for i, (source_url, tandem_url) in enumerate(zip(secrets["source_urls"], secrets["tandem_urls"])):
+        for source_url in source_urls:
+            tandem_url = url_mapping.get(source_url)
             data = fetch_data_from_source(source_url, secrets)
+            
             if data:
                 #check if motion is the keyword
                 curr_motion = data.get('sensorStats', {}).get('motion', {}).get('instant')
 
                 if curr_motion is not None:
-                    if prev_motion[i] is None:
-                        prev_motion[i] = curr_motion
+                    if prev_motion[source_url] is None:
+                        prev_motion[source_url] = curr_motion
 
-                    motion_detected = motion_conversion(curr_motion, prev_motion[i])
-                    prev_motion[i] = curr_motion # update prev motion value
+                    motion_detected = motion_conversion(curr_motion, prev_motion[source_url])
+                    prev_motion[source_url] = curr_motion # update prev motion value
 
                     #prep data for push
                     sensor_stats = data.get('sensorStats', {})
@@ -94,14 +105,19 @@ def main():
 
 
 
-                # Push data to Autodesk Tandem Connect
-                    push_data_to_tandem(datapush, tandem_url)
+                    
+                    # Push data to Autodesk Tandem Connect
+                    if tandem_url in tandem_urls:
+                        push_data_to_tandem(datapush, tandem_url)
+                    else:
+                        print(f"No Tandem URL mapped for source URL: {source_url}")
                 else:
                     print("No 'motion' parameter found")
             else: 
                 print("No data fetched from source")
 
-            time.sleep(30) #wait for 5 minutes to run again
+        print("Cycle complete. Sleeping for 5 minutes...")
+        time.sleep(300) #wait for 5 minutes to run again
 
 if __name__ == "__main__":
     main()
